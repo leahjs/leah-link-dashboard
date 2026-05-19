@@ -1,0 +1,15 @@
+{
+  "name": "leah-link-dashboard",
+  "local_port": 51742,
+  "entrypoint": "bun run dev",
+  "publish": {
+    "label": "leah-link-dashboard",
+    "type": "http",
+    "entrypoint": "bun run prod",
+    "published_port": 50267,
+    "env": {
+      "NODE_ENV": "production",
+      "ZO_CLIENT_IDENTITY_TOKEN": "none"
+    }
+  }
+}
