@@ -1,5 +1,5 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import BlankDemo from "./pages/blank-demo";
+import LinkDashboard from "./pages/link-dashboard";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export default function App() {
@@ -7,7 +7,7 @@ export default function App() {
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<BlankDemo />} />
+          <Route path="/" element={<LinkDashboard />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
