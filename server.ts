@@ -11,6 +11,9 @@ const app = new Hono();
 const mode: Mode =
   process.env.NODE_ENV === "production" ? "production" : "development";
 
+const NO_STORE = "no-store, no-cache, must-revalidate, max-age=0";
+const IMMUTABLE = "public, max-age=31536000, immutable";
+
 /**
  * Add any API routes here.
  */
@@ -22,11 +25,6 @@ if (mode === "production") {
   await configureDevelopment(app);
 }
 
-/**
- * Determine port based on mode. In production, use the published_port if available.
- * In development, always use the local_port.
- * Ports are managed by the system and injected via the PORT environment variable.
- */
 const port = process.env.PORT
   ? parseInt(process.env.PORT, 10)
   : mode === "production"
@@ -38,13 +36,25 @@ export default { fetch: app.fetch, port, idleTimeout: 255 };
 /**
  * Configure routing for production builds.
  *
- * - Streams prebuilt assets from `dist`.
- * - Static files from `public/` are copied to `dist/` by Vite and served at root paths.
- * - Falls back to `index.html` for any other GET so the SPA router can resolve the request.
+ * Cache strategy:
+ * - /assets/* are Vite-hashed → immutable, 1 year.
+ * - index.html / SPA fallback → no-store so deploys are picked up immediately.
+ * - Other public files (favicon, images) → no-store too, since they aren't
+ *   content-hashed and stale copies cause the "caching really hard" bug.
  */
 function configureProduction(app: Hono) {
-  app.use("/assets/*", serveStatic({ root: "./dist" }));
+  app.use(
+    "/assets/*",
+    serveStatic({
+      root: "./dist",
+      onFound: (_path, c) => {
+        c.header("Cache-Control", IMMUTABLE);
+      },
+    }),
+  );
+
   app.get("/favicon.ico", (c) => c.redirect("/favicon.svg", 302));
+
   app.use(async (c, next) => {
     if (c.req.method !== "GET") return next();
 
@@ -55,20 +65,22 @@ function configureProduction(app: Hono) {
     if (await file.exists()) {
       const stat = await file.stat();
       if (stat && !stat.isDirectory()) {
-        return new Response(file);
+        return new Response(file, {
+          headers: { "Cache-Control": NO_STORE },
+        });
       }
     }
 
-    return serveStatic({ path: "./dist/index.html" })(c, next);
+    // SPA fallback — must never be cached or users get stuck on old builds.
+    const html = await Bun.file("./dist/index.html").text();
+    return c.html(html, {
+      headers: { "Cache-Control": NO_STORE },
+    });
   });
 }
 
 /**
  * Configure routing for development builds.
- *
- * - Boots Vite in middleware mode for transforms.
- * - Static files from `public/` are served at root paths (matching Vite convention).
- * - Mirrors production routing semantics so SPA routes behave consistently.
  */
 async function configureDevelopment(app: Hono): Promise<ViteDevServer> {
   const vite = await createViteServer({
@@ -86,7 +98,7 @@ async function configureDevelopment(app: Hono): Promise<ViteDevServer> {
         let template = await Bun.file("./index.html").text();
         template = await vite.transformIndexHtml(url, template);
         return c.html(template, {
-          headers: { "Cache-Control": "no-store, must-revalidate" },
+          headers: { "Cache-Control": NO_STORE },
         });
       }
 
@@ -95,7 +107,7 @@ async function configureDevelopment(app: Hono): Promise<ViteDevServer> {
         const stat = await publicFile.stat();
         if (stat && !stat.isDirectory()) {
           return new Response(publicFile, {
-            headers: { "Cache-Control": "no-store, must-revalidate" },
+            headers: { "Cache-Control": NO_STORE },
           });
         }
       }
@@ -111,7 +123,7 @@ async function configureDevelopment(app: Hono): Promise<ViteDevServer> {
         return new Response(result.code, {
           headers: {
             "Content-Type": "application/javascript",
-            "Cache-Control": "no-store, must-revalidate",
+            "Cache-Control": NO_STORE,
           },
         });
       }
@@ -119,7 +131,7 @@ async function configureDevelopment(app: Hono): Promise<ViteDevServer> {
       let template = await Bun.file("./index.html").text();
       template = await vite.transformIndexHtml("/", template);
       return c.html(template, {
-        headers: { "Cache-Control": "no-store, must-revalidate" },
+        headers: { "Cache-Control": NO_STORE },
       });
     } catch (error) {
       vite.ssrFixStacktrace(error as Error);
